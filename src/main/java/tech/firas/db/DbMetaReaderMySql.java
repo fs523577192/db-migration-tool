@@ -21,18 +21,13 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Locale;
+import java.util.LinkedList;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.StringUtils;
 
 import tech.firas.db.datatype.BigIntType;
 import tech.firas.db.datatype.BlobType;
@@ -54,25 +49,18 @@ import tech.firas.db.vo.Schema;
 import tech.firas.db.vo.Table;
 
 /**
- * Please be noted that according to https://www.postgresql.org/docs/13/sql-syntax-lexical.html
- * and https://www.postgresql.org/docs/16/sql-syntax-lexical.html,
- * "the folding of unquoted names to lower case in PostgreSQL is incompatible with the SQL standard,
- * which says that unquoted names should be folded to upper case."
- * Therefore, the schema / table / column / index name is all lower case if the name is not quoted
- * when it is created.
+ * For identifier case sensitivity, refer to
+ * https://dev.mysql.com/doc/refman/8.0/en/identifier-case-sensitivity.html and
+ * https://dev.mysql.com/doc/refman/5.7/en/identifier-case-sensitivity.html
  */
 @Slf4j
-public class DbMetaReaderPostgre extends AbstractDbMetaReader {
-
-    private static final Pattern INDEX_PATTERN = Pattern.compile("^CREATE (UNIQUE )?INDEX (\"?)(\\w+)\\2 " +
-            "ON (\\w+)\\.(\\w+) " +
-            "USING (\\w+) \\((\\w+(?:, \\w+)*)\\)");
+public class DbMetaReaderMySql extends AbstractDbMetaReader {
 
     /**
-     * Refer to https://www.postgresql.org/docs/13/information-schema.html
+     * Refer to https://dev.mysql.com/doc/refman/8.0/en/information-schema-schemata-table.html
      * @param connection the DB Connection
-     * @return a Set of Schema in the PostgreSQL database
-     * @throws SQLException if it failed to query PostgreSQL
+     * @return a Set of Schema in the MySQL database
+     * @throws SQLException if it failed to query MySQL
      */
     @Override
     public Set<Schema> read(final Connection connection) throws SQLException {
@@ -81,7 +69,7 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
             try (final ResultSet resultSet = statement.executeQuery(
                     "SELECT schema_name FROM information_schema.schemata " +
                             // excluding system schema
-                            "WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast') " +
+                            "WHERE schema_name NOT IN ('information_schema', 'performance_schema') " +
                             "ORDER BY schema_name")) {
                 while (resultSet.next()) {
                     final Schema schema = new Schema();
@@ -97,11 +85,11 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
     }
 
     /**
-     * Refer to https://www.postgresql.org/docs/13/infoschema-tables.html
+     * Refer to https://dev.mysql.com/doc/refman/8.0/en/information-schema-tables-table.html
      * @param connection the DB Connection
      * @param schema the Schema
      * @return a Set of Table in the specified Schema
-     * @throws SQLException if it failed to query PostgreSQL
+     * @throws SQLException if it failed to query MySQL
      */
     @Override
     public Set<Table> readTables(final Connection connection, final Schema schema) throws SQLException {
@@ -133,7 +121,7 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
      * @param connection the DB Connection
      * @param table the Table
      * @return a LinkedHashMap with column name as key and Column as value
-     * @throws SQLException if it failed to query PostgreSQL
+     * @throws SQLException if it failed to query MySQL
      */
     @Override
     public LinkedHashMap<String, Column> readColumns(final Connection connection, final Table table) throws SQLException {
@@ -165,50 +153,68 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
      * @param connection the DB Connection
      * @param table the Table
      * @return a Map with index name as key and Index as value
-     * @throws SQLException if it failed to query PostgreSQL
+     * @throws SQLException if it failed to query MySQL
      */
     @Override
     public Map<String, Index> readIndexes(final Connection connection, final Table table) throws SQLException {
         try (final PreparedStatement ps = connection.prepareStatement(
-                "SELECT p.indexName, p.indexDef, c.constraint_type " +
-                        "FROM pg_indexes p " +
+                "SELECT s.index_name, s.non_unique, s.column_name, c.constraint_type " +
+                        "FROM information_schema.statistics s " +
                         "LEFT JOIN information_schema.table_constraints c " +
-                        "ON c.table_schema = p.schemaName AND c.table_name = p.tableName AND c.constraint_name = p.indexName " +
-                        "WHERE p.schemaName = ? AND p.tableName = ? " +
-                        "GROUP BY p.indexName, p.indexDef, c.constraint_type ORDER BY p.indexName")) {
+                        "ON c.table_schema = s.table_schema AND c.table_name = s.table_name AND c.constraint_name = s.index_name " +
+                        "WHERE s.table_schema = ? AND s.table_name = ? " +
+                        "ORDER BY s.index_name, s.seq_in_index, c.constraint_type")) {
             ps.setString(1, table.getSchema().getName());
             ps.setString(2, table.getName());
             try (final ResultSet resultSet = ps.executeQuery()) {
                 final Map<String, Index> result = new LinkedHashMap<>();
                 while (resultSet.next()) {
-                    final Index index = new Index();
-                    index.setTable(table);
-                    index.setName(resultSet.getString("indexName"));
-                    readIndex(index, resultSet.getString("indexDef"),
-                            resultSet.getString("constraint_type"));
-                    result.put(index.getName(), index);
+                    final String indexName = resultSet.getString("index_name");
+                    final boolean unique = resultSet.getInt("non_unique") == 0;
+                    final String constraintType = resultSet.getString("constraint_type");
+                    final Index index = result.computeIfAbsent(indexName, k -> {
+                        final Index i = new Index();
+                        i.setTable(table);
+                        i.setName(indexName);
+                        i.setColumns(new LinkedList<>());
+                        readIndex(i, unique, constraintType);
+                        return i;
+                    });
+                    index.getColumns().add(
+                            table.getColumnMap().get(resultSet.getString("column_name"))
+                    );
                 }
                 return result;
             }
         }
     }
 
+    /**
+     *
+     * @param identifier the identifier to be quoted
+     * @return the quoted identifier for MySQL (quoted with back quote '`')
+     */
+    @Override
+    public String quote(final String identifier) {
+        return '`' + identifier + '`'; // TODO: complicated case with back quote in the identifier itself
+    }
+
     private static DataType readDataType(final ResultSet resultSet) throws SQLException {
         final String typeName = resultSet.getString("data_type");
-        if ("integer".equals(typeName)) {
+        if ("int".equals(typeName)) {
             return IntegerType.instance;
         } else if ("bigint".equals(typeName)) {
             return BigIntType.instance;
-        } else if ("smallint".equals(typeName)) {
+        } else if ("smallint".equals(typeName) || "tinyint".equals(typeName)) {
             return SmallIntType.instance;
 
-        } else if ("numeric".equals(typeName)) {
+        } else if ("decimal".equals(typeName)) {
             final DecimalType decimalType = new DecimalType();
             decimalType.setPrecision(resultSet.getInt("numeric_precision"));
             decimalType.setScale(resultSet.getInt("numeric_scale"));
             return decimalType;
 
-        } else if ("character varying".equals(typeName)) {
+        } else if ("varchar".equals(typeName)) {
             final VarCharType varCharType = new VarCharType();
             varCharType.setLength(resultSet.getInt("character_maximum_length"));
             return varCharType;
@@ -217,13 +223,13 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
             charType.setLength(resultSet.getInt("character_maximum_length"));
             return charType;
 
-        } else if ("timestamp without time zone".equals(typeName)) {
+        } else if ("datetime".equals(typeName) || "timestamp".equals(typeName)) {
             final TimestampType timestampType = new TimestampType();
             timestampType.setPrecision(resultSet.getInt("datetime_precision"));
             return timestampType;
         } else if ("date".equals(typeName)) {
             return DateType.instance;
-        } else if ("time without time zone".equals(typeName)) {
+        } else if ("time".equals(typeName)) {
             final TimeType timeType = new TimeType();
             timeType.setPrecision(resultSet.getInt("datetime_precision"));
             return timeType;
@@ -231,7 +237,7 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
         } else if ("text".equals(typeName)) {
             return ClobType.instance;
 
-        } else if ("bytea".equals(typeName)) {
+        } else if ("blob".equals(typeName)) {
             return BlobType.instance;
 
         } else {
@@ -242,19 +248,10 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
         }
     }
 
-    private static void readIndex(final Index index, final String indexDefinition, final String constraintType) {
-        final Matcher matcher = INDEX_PATTERN.matcher(indexDefinition);
-        if (!matcher.find()) {
-            throw new IllegalStateException("Invalid index definition: " + indexDefinition);
-        }
-
-        if ( log.isDebugEnabled() && "\"".equals(matcher.group(2)) ) {
-            log.debug("Quoted index name: {}", matcher.group(3));
-        }
-
-        if ("PRIMARY_KEY".equals(constraintType)) {
+    private static void readIndex(final Index index, final boolean unique, final String constraintType) {
+        if ("PRIMARY KEY".equals(constraintType)) {
             index.setIndexType(IndexType.PRIMARY_KEY);
-        } else if ( "UNIQUE".equals(matcher.group(1)) ) {
+        } else if (unique) {
             log.debug("unique index {}.{}, constraint type: {}", index.getTable().getSchema().getName(),
                     index.getName(), constraintType);
             index.setIndexType(IndexType.UNIQUE_KEY);
@@ -263,60 +260,5 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
                     index.getName(), constraintType);
             index.setIndexType(IndexType.NORMAL);
         }
-
-        final Map<String, Column> columnMap = index.getTable().getColumnMap();
-        final String[] columnArray = StringUtils.splitByWholeSeparatorPreserveAllTokens(matcher.group(7), ", ");
-        final List<Column> columnList = new ArrayList<>(columnArray.length);
-        for (final String columnName : columnArray) {
-            final Column column = columnMap.get(columnName);
-            columnList.add(column);
-        }
-        index.setColumns(columnList);
-    }
-
-    /**
-     *
-     * @param identifier the identifier to be quoted
-     * @return the quoted identifier for PostgreSQL (quoted with double quote '"')
-     */
-    @Override
-    public String quote(final String identifier) {
-        return '"' + identifier + '"'; // TODO: complicated case with double quote in the identifier itself
-    }
-
-    /**
-     * According to https://www.postgresql.org/docs/13/sql-syntax-lexical.html and
-     * https://www.postgresql.org/docs/16/sql-syntax-lexical.html,
-     * "the folding of unquoted names to lower case in PostgreSQL is incompatible with the SQL standard,
-     * which says that unquoted names should be folded to upper case."
-     * Therefore, this method is provided to convert the unquoted identifier that are folded to lower case
-     * to upper case to align with the SQL standard.
-     * Please be noted that if the <code>identifier</code> contains upper case letter,
-     * this method will consider it as a quoted name and
-     * will NOT convert the lower case letter to upper case.
-     * @param identifier the identifier to be converted to align with SQL standard
-     * @return an identifier that align with the SQL standard (lower case converted to upper case)
-     */
-    public static String sqlStandardIdentifier(final String identifier) {
-        boolean hasUpperCase = false;
-        boolean hasLowerCase = false;
-        for (final char c : identifier.toCharArray()) {
-            if (Character.isLowerCase(c)) {
-                hasLowerCase = true;
-            } else if (Character.isUpperCase(c)) {
-                hasUpperCase = true;
-            }
-        }
-        if (hasLowerCase) {
-            if (hasUpperCase) {
-                log.warn("The identifier has both lower case letter and upper case letter: " + identifier);
-            } else {
-                // assume all lower case
-                return identifier.toUpperCase(Locale.ROOT);
-            }
-        } else {
-            log.debug("The identifier has no lower case letter: " + identifier);
-        }
-        return identifier;
     }
 }

@@ -76,4 +76,9 @@ public class DbMetaWriterDB2 extends AbstractDbMetaWriter {
             return super.dataTypeToString(dataType);
         }
     }
+
+    @Override
+    public String quote(final String identifier) {
+        return '"' + identifier + '"'; // TODO: complicated case with double quote in the identifier itself
+    }
 }

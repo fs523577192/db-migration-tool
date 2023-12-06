@@ -71,7 +71,9 @@ public class DecimalType implements DataType {
                     BigInteger.valueOf( ((Number) value).longValue() )
             ));
         } else {
-            preparedStatement.setBigDecimal(index, new BigDecimal(value.toString()));
+            preparedStatement.setBigDecimal(index,
+                    new BigDecimal(value.toString())
+            );
         }
     }
 }

@@ -61,7 +61,9 @@ public class DbMetaReaderDB2 extends AbstractDbMetaReader {
     public Set<Schema> read(final Connection connection) throws SQLException {
         try (final Statement statement = connection.createStatement()) {
             try (final ResultSet resultSet = statement.executeQuery(
-                    "select schemaName, REMARKS from SYSCAT.SCHEMATA order by schemaName")) {
+                    "select schemaName, REMARKS from SYSCAT.SCHEMATA " +
+                            // excluding system schema
+                            "WHERE DEFINER <> 'SYSIBM' order by schemaName")) {
                 final Set<Schema> result = new LinkedHashSet<>();
                 while (resultSet.next()) {
                     final Schema schema = new Schema();
@@ -127,7 +129,7 @@ public class DbMetaReaderDB2 extends AbstractDbMetaReader {
                     final Column column = new Column();
                     column.setTable(table);
                     column.setName(resultSet.getString("tabName"));
-                    column.setNotNull("N".equals(resultSet.getString("NULLS")));
+                    column.setNotNull( "N".equals(resultSet.getString("NULLS")) );
                     column.setDataType(readDataType(resultSet));
                     column.setComment(resultSet.getString("REMARKS"));
                     result.put(column.getName(), column);
@@ -158,13 +160,18 @@ public class DbMetaReaderDB2 extends AbstractDbMetaReader {
                     final Index index = new Index();
                     index.setTable(table);
                     index.setName(resultSet.getString("tabName"));
-                    index.setIndexType(readIndexType(resultSet.getString("uniqueRule")));
-                    index.setColumns(this.readColumnsOfIndex(table, resultSet.getString("colNames")));
+                    index.setIndexType( readIndexType(resultSet.getString("uniqueRule")) );
+                    index.setColumns( this.readColumnsOfIndex(table, resultSet.getString("colNames")) );
                     result.put(index.getName(), index);
                 }
                 return result;
             }
         }
+    }
+
+    @Override
+    public String quote(final String identifier) {
+        return '"' + identifier + '"'; // TODO: complicated case with double quote in the identifier itself
     }
 
     private static DataType readDataType(final ResultSet resultSet) throws SQLException {
@@ -232,7 +239,8 @@ public class DbMetaReaderDB2 extends AbstractDbMetaReader {
         final List<Column> columnList = new ArrayList<>(columnArray.length - 1);
         for (int i = 1; i < columnArray.length; i += 1) {
             columnList.add(
-                    table.getColumnMap().get(columnArray[i]));
+                    table.getColumnMap().get(columnArray[i])
+            );
         }
         return columnList;
     }

@@ -72,7 +72,7 @@ public class Table implements Serializable {
             if (column == null) {
                 throw new IllegalArgumentException("There is at least one null column");
             }
-            if (!columnName.equals(column.getName())) {
+            if ( ! columnName.equals(column.getName()) ) {
                 throw new IllegalArgumentException("The key of 'columnMap' must be the name of the column");
             }
         }
@@ -87,7 +87,7 @@ public class Table implements Serializable {
             if (index == null) {
                 throw new IllegalArgumentException("THere is at least one null index");
             }
-            if (!Objects.equals(entry.getKey(), index.getName())) {
+            if ( ! Objects.equals(entry.getKey(), index.getName()) ) {
                 throw new IllegalArgumentException("The key of 'indexMap' must be the name of the index");
             }
             if (index.getIndexType() == IndexType.PRIMARY_KEY) {

@@ -124,9 +124,9 @@ public abstract class AbstractDbMetaWriter extends AbstractDbMetaUtil implements
         }
         builder.append("INDEX ");
         if (index.getName() != null) {
-            builder.append(this.quote(index.getName())).append(' ');
+            builder.append( this.quote(index.getName()) ).append(' ');
         }
-        builder.append("ON ").append(this.tableName(index.getTable())).append(" (").append(columns).append(')');
+        builder.append("ON ").append( this.tableName(index.getTable()) ).append(" (").append(columns).append(')');
         return builder.toString();
     }
 
@@ -136,9 +136,9 @@ public abstract class AbstractDbMetaWriter extends AbstractDbMetaUtil implements
                 .map(this::quote)
                 .collect(Collectors.joining(", "));
         final StringBuilder builder = new StringBuilder("ALTER TABLE ")
-                .append(this.tableName(index.getTable())).append(" ADD");
+                .append( this.tableName(index.getTable()) ).append(" ADD");
         if (index.getName() != null) {
-            builder.append(" CONSTRAINT ").append(this.quote(index.getName()));
+            builder.append(" CONSTRAINT ").append( this.quote(index.getName()) );
         }
         builder.append(" PRIMARY KEY (").append(columns).append(')');
         return builder.toString();
@@ -259,7 +259,7 @@ public abstract class AbstractDbMetaWriter extends AbstractDbMetaUtil implements
         if (ifNotExists) {
             builder.append("IF NOT EXISTS ");
         }
-        builder.append(this.quote(schema.getName()));
+        builder.append( this.quote(schema.getName()) );
         return builder.toString();
     }
 
