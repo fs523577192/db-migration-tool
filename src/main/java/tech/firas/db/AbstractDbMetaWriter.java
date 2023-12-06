@@ -12,8 +12,6 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import tech.firas.db.datatype.BigIntType;
 import tech.firas.db.datatype.CharType;
@@ -66,7 +64,7 @@ public abstract class AbstractDbMetaWriter extends AbstractDbMetaUtil implements
     @Override
     public String columnInCreateTable(final Column column) {
         Objects.requireNonNull(column, "column must not be null");
-        return column.getName() + ' ' + this.dataTypeToString(column.getDataType()) +
+        return this.quote(column.getName()) + ' ' + this.dataTypeToString(column.getDataType()) +
                 (column.isNotNull() ? " NOT NULL" : "");
     }
 
@@ -102,6 +100,7 @@ public abstract class AbstractDbMetaWriter extends AbstractDbMetaUtil implements
         }
         final String columns = index.getColumns().stream()
                 .map(Column::getName)
+                .map(this::quote)
                 .collect(Collectors.joining(", "));
         final StringBuilder builder = new StringBuilder("CREATE ");
         if (index.getIndexType() == IndexType.UNIQUE_KEY) {
@@ -109,7 +108,7 @@ public abstract class AbstractDbMetaWriter extends AbstractDbMetaUtil implements
         }
         builder.append("INDEX ");
         if (index.getName() != null) {
-            builder.append(index.getName()).append(' ');
+            builder.append(this.quote(index.getName())).append(' ');
         }
         builder.append("ON ").append(this.tableName(index.getTable())).append(" (").append(columns).append(')');
         return builder.toString();
@@ -118,11 +117,12 @@ public abstract class AbstractDbMetaWriter extends AbstractDbMetaUtil implements
     protected String createPrimaryKeySql(final Index index) {
         final String columns = index.getColumns().stream()
                 .map(Column::getName)
+                .map(this::quote)
                 .collect(Collectors.joining(", "));
         final StringBuilder builder = new StringBuilder("ALTER TABLE ")
                 .append(this.tableName(index.getTable())).append(" ADD");
         if (index.getName() != null) {
-            builder.append(" CONSTRAINT ").append(index.getName());
+            builder.append(" CONSTRAINT ").append(this.quote(index.getName()));
         }
         builder.append(" PRIMARY KEY (").append(columns).append(')');
         return builder.toString();
@@ -211,7 +211,7 @@ public abstract class AbstractDbMetaWriter extends AbstractDbMetaUtil implements
     @Override
     public String createStatementFor(final Column column) {
         return "ALTER TABLE " + this.tableName(column.getTable()) + " ADD COLUMN " +
-                column.getName() + ' ' + this.dataTypeToString(column.getDataType()) +
+                this.quote(column.getName()) + ' ' + this.dataTypeToString(column.getDataType()) +
                 (column.isNotNull() ? " NOT NULL" : "");
     }
 
@@ -243,7 +243,7 @@ public abstract class AbstractDbMetaWriter extends AbstractDbMetaUtil implements
         if (ifNotExists) {
             builder.append("IF NOT EXISTS ");
         }
-        builder.append(schema.getName());
+        builder.append(this.quote(schema.getName()));
         return builder.toString();
     }
 
@@ -261,7 +261,8 @@ public abstract class AbstractDbMetaWriter extends AbstractDbMetaUtil implements
     public String insertSqlFor(final Table table) {
         final Set<String> columnNames = table.getColumnMap().keySet();
         return "INSERT INTO " + this.tableName(table) + " (" +
-                String.join(", ", columnNames) + ")\nVALUES (" +
+                columnNames.stream().map(this::quote).collect(Collectors.joining(", ")) +
+                ")\nVALUES (" +
                 columnNames.stream().map(c -> "?").collect(Collectors.joining(", ")) + ')';
     }
 
@@ -271,7 +272,7 @@ public abstract class AbstractDbMetaWriter extends AbstractDbMetaUtil implements
         return "UPDATE " + this.tableName(table) + " SET " +
                 table.getColumnMap().values().stream()
                         .filter(column -> !primaryKeyColumns.contains(column))
-                        .map(column -> column.getName() + " = ?")
+                        .map(column -> this.quote(column.getName()) + " = ?")
                         .collect(Collectors.joining(", ")) +
                 '\n' + this.whereSqlForPrimaryKey(table);
     }
@@ -281,16 +282,17 @@ public abstract class AbstractDbMetaWriter extends AbstractDbMetaUtil implements
         return "TRUNCATE TABLE " + this.tableName(table);
     }
 
-    private static void constraintInCreateTable(final StringBuilder createTable, final String indexName,
+    private void constraintInCreateTable(final StringBuilder createTable, final String indexName,
             final String constraintType, final List<Column> columns) {
         createTable.append(",\n  ");
         if (indexName != null) {
-            createTable.append("CONSTRAINT ").append(indexName).append(' ');
+            createTable.append("CONSTRAINT ").append(this.quote(indexName)).append(' ');
         }
         createTable.append(constraintType);
         createTable.append(
                 columns.stream()
                         .map(Column::getName)
+                        .map(this::quote)
                         .collect(Collectors.joining(", "))
         );
         createTable.append(')');

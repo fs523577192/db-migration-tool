@@ -44,6 +44,12 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
             "ON (\\w+)\\.(\\w+) " +
             "USING (\\w+) \\((\\w+(?:, \\w+)*)\\)");
 
+    /**
+     * Refer to https://www.postgresql.org/docs/13/information-schema.html
+     * @param connection the DB Connection
+     * @return a Set of Schema in the DB2 database
+     * @throws SQLException if it failed to query PostgreSQL
+     */
     @Override
     public Set<Schema> read(final Connection connection) throws SQLException {
         final Set<Schema> result = new LinkedHashSet<>();
@@ -63,6 +69,13 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
         return result;
     }
 
+    /**
+     * Refer to https://www.postgresql.org/docs/13/infoschema-tables.html
+     * @param connection the DB Connection
+     * @param schema the Schema
+     * @return a Set of Table in the specified Schema
+     * @throws SQLException if it failed to query PostgreSQL
+     */
     @Override
     public Set<Table> readTables(final Connection connection, final Schema schema) throws SQLException {
         final Set<Table> result = new LinkedHashSet<>();
@@ -88,8 +101,15 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
         return result;
     }
 
+    /**
+     * Refer to https://www.postgresql.org/docs/13/infoschema-columns.html
+     * @param connection the DB Connection
+     * @param table the Table
+     * @return a LinkedHashMap with column name as key and Column as value
+     * @throws SQLException if it failed to query PostgreSQL
+     */
     @Override
-    public Map<String, Column> readColumns(final Connection connection, final Table table) throws SQLException {
+    public LinkedHashMap<String, Column> readColumns(final Connection connection, final Table table) throws SQLException {
         try (final PreparedStatement ps = connection.prepareStatement(
                 "SELECT column_name, data_type, character_maximum_length, " +
                         "numeric_precision, numeric_scale, datetime_precision, column_default, is_nullable " +
@@ -98,7 +118,7 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
             ps.setString(1, table.getSchema().getName().toLowerCase(Locale.US));
             ps.setString(2, table.getName().toLowerCase(Locale.US));
             try (final ResultSet resultSet = ps.executeQuery()) {
-                final Map<String, Column> result = new LinkedHashMap<>();
+                final LinkedHashMap<String, Column> result = new LinkedHashMap<>();
                 while (resultSet.next()) {
                     final Column column = new Column();
                     column.setTable(table);
@@ -112,6 +132,14 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
         }
     }
 
+    /**
+     * Refer to https://www.postgresql.org/docs/13/view-pg-indexes.html
+     * and https://www.postgresql.org/docs/13/infoschema-table-constraints.html
+     * @param connection the DB Connection
+     * @param table the Table
+     * @return a Map with index name as key and Index as value
+     * @throws SQLException if it failed to query PostgreSQL
+     */
     @Override
     public Map<String, Index> readIndexes(final Connection connection, final Table table) throws SQLException {
         try (final PreparedStatement ps = connection.prepareStatement(
