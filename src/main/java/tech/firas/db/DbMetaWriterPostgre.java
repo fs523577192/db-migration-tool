@@ -59,6 +59,16 @@ public class DbMetaWriterPostgre extends AbstractDbMetaWriter {
         }
     }
 
+    /**
+     * Quote the identifier
+     * @param identifier the identifier to be quoted
+     * @return the quoted identifier for PostgreSQL (quoted with double quote '"')
+     */
+    @Override
+    public String quote(final String identifier) {
+        return '"' + identifier + '"'; // TODO: complicated case with double quote in the identifier itself
+    }
+
     @Override
     public String createStatementFor(final Schema schema) {
         return super.createStatementFor(schema, true);

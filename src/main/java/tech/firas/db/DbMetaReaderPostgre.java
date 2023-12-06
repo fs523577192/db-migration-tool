@@ -31,6 +31,8 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import lombok.Getter;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
@@ -61,9 +63,17 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
             "USING (\\w+) \\((\\w+(?:, \\w+)*)\\)");
 
     /**
+     * Whether this DbMetaReaderPostgre should convert the schema / table / column / index name
+     * to align with SQL standard, refer to {@link .sqlStandardIdentifier}.
+     * The default value is true
+     */
+    @Getter @Setter
+    private boolean convertNameAlignSqlStandard = true;
+
+    /**
      * Refer to https://www.postgresql.org/docs/13/information-schema.html
      * @param connection the DB Connection
-     * @return a Set of Schema in the DB2 database
+     * @return a Set of Schema in the PostgreSQL database
      * @throws SQLException if it failed to query PostgreSQL
      */
     @Override
@@ -71,10 +81,14 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
         final Set<Schema> result = new LinkedHashSet<>();
         try (final Statement statement = connection.createStatement()) {
             try (final ResultSet resultSet = statement.executeQuery(
-                    "SELECT schema_name FROM information_schema.schemata ORDER BY schema_name")) {
+                    "SELECT schema_name FROM information_schema.schemata " +
+                            // excluding system schema
+                            "WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast') " +
+                            "ORDER BY schema_name")) {
                 while (resultSet.next()) {
                     final Schema schema = new Schema();
-                    schema.setName(resultSet.getString("schema_name"));
+                    schema.setName(convertIdentifierIfNeeded(
+                            resultSet.getString("schema_name")));
                     result.add(schema);
                 }
             }
@@ -98,12 +112,13 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
         try (final PreparedStatement ps = connection.prepareStatement(
                 "SELECT table_name FROM information_schema.tables " +
                         "WHERE table_schema = ? AND table_type = 'BASE TABLE' ORDER BY table_name")) {
-            ps.setString(1, schema.getName().toLowerCase(Locale.US));
+            ps.setString(1, this.queryName(schema.getName()));
             try (final ResultSet resultSet = ps.executeQuery()) {
                 while (resultSet.next()) {
                     final Table table = new Table();
                     table.setSchema(schema);
-                    table.setName(resultSet.getString("table_name"));
+                    table.setName(convertIdentifierIfNeeded(
+                            resultSet.getString("table_name")));
                     result.add(table);
                 }
             }
@@ -131,14 +146,15 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
                         "numeric_precision, numeric_scale, datetime_precision, column_default, is_nullable " +
                         "FROM information_schema.columns " +
                         "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position")) {
-            ps.setString(1, table.getSchema().getName().toLowerCase(Locale.US));
-            ps.setString(2, table.getName().toLowerCase(Locale.US));
+            ps.setString(1, this.queryName(table.getSchema().getName()));
+            ps.setString(2, this.queryName(table.getName()));
             try (final ResultSet resultSet = ps.executeQuery()) {
                 final LinkedHashMap<String, Column> result = new LinkedHashMap<>();
                 while (resultSet.next()) {
                     final Column column = new Column();
                     column.setTable(table);
-                    column.setName(resultSet.getString("column_name"));
+                    column.setName(convertIdentifierIfNeeded(
+                            resultSet.getString("column_name")));
                     column.setNotNull("NO".equals(resultSet.getString("is_nullable")));
                     column.setDataType(readDataType(resultSet));
                     result.put(column.getName(), column);
@@ -165,14 +181,15 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
                         "ON c.table_schema = p.schemaName AND c.table_name = p.tableName AND c.constraint_name = p.indexName " +
                         "WHERE p.schemaName = ? AND p.tableName = ? " +
                         "GROUP BY p.indexName, p.indexDef, c.constraint_type ORDER BY p.indexName")) {
-            ps.setString(1, table.getSchema().getName().toLowerCase(Locale.US));
-            ps.setString(2, table.getName().toLowerCase(Locale.US));
+            ps.setString(1, this.queryName(table.getSchema().getName()));
+            ps.setString(2, this.queryName(table.getName()));
             try (final ResultSet resultSet = ps.executeQuery()) {
                 final Map<String, Index> result = new LinkedHashMap<>();
                 while (resultSet.next()) {
                     final Index index = new Index();
                     index.setTable(table);
-                    index.setName(resultSet.getString("indexName"));
+                    index.setName(convertIdentifierIfNeeded(
+                            resultSet.getString("indexName")));
                     readIndex(index, resultSet.getString("indexDef"),
                             resultSet.getString("constraint_type"));
                     result.put(index.getName(), index);
@@ -231,7 +248,7 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
         }
     }
 
-    private static void readIndex(final Index index, final String indexDefinition, final String constraintType) {
+    private void readIndex(final Index index, final String indexDefinition, final String constraintType) {
         final Matcher matcher = INDEX_PATTERN.matcher(indexDefinition);
         if (!matcher.find()) {
             throw new IllegalStateException("Invalid index definition: " + indexDefinition);
@@ -257,9 +274,111 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
         final String[] columnArray = StringUtils.splitByWholeSeparatorPreserveAllTokens(matcher.group(7), ", ");
         final List<Column> columnList = new ArrayList<>(columnArray.length);
         for (final String columnName : columnArray) {
-            final Column column = columnMap.get(columnName);
+            final Column column = columnMap.get(this.convertIdentifierIfNeeded(columnName));
             columnList.add(column);
         }
         index.setColumns(columnList);
+    }
+
+    /**
+     * According to https://www.postgresql.org/docs/13/sql-syntax-lexical.html and
+     * https://www.postgresql.org/docs/16/sql-syntax-lexical.html,
+     * "the folding of unquoted names to lower case in PostgreSQL is incompatible with the SQL standard,
+     * which says that unquoted names should be folded to upper case."
+     * This method does not quote the identifier if the identifier is all lower case and
+     * {@link .convertNameAlignSqlStandard} is true as the identifier is probably folded
+     * into all lower case by PostgreSQL.
+     * @param identifier the identifier to be quoted
+     * @return the quoted identifier for PostgreSQL (quoted with double quote '"')
+     */
+    @Override
+    public String quote(final String identifier) {
+        boolean hasUpperCase = false;
+        boolean hasLowerCase = false;
+        for (final char c : identifier.toCharArray()) {
+            if (Character.isLowerCase(c)) {
+                hasLowerCase = true;
+            } else if (Character.isUpperCase(c)) {
+                hasUpperCase = true;
+            }
+        }
+        if (hasLowerCase) {
+            if (hasUpperCase) {
+                log.debug("The identifier has both lower case letter and upper case letter: " + identifier);
+            } else if (this.convertNameAlignSqlStandard) {
+                return identifier;
+            }
+        } else {
+            log.debug("The identifier has no lower case letter: " + identifier);
+        }
+        return '"' + identifier + '"'; // TODO: complicated case with double quote in the identifier itself
+    }
+
+    private String convertIdentifierIfNeeded(final String identifier) {
+        if (this.convertNameAlignSqlStandard) {
+            return sqlStandardIdentifier(identifier);
+        }
+        return identifier;
+    }
+
+    private String queryName(final String identifier) {
+        if (this.convertNameAlignSqlStandard) {
+            boolean hasUpperCase = false;
+            boolean hasLowerCase = false;
+            for (final char c : identifier.toCharArray()) {
+                if (Character.isLowerCase(c)) {
+                    hasLowerCase = true;
+                } else if (Character.isUpperCase(c)) {
+                    hasUpperCase = true;
+                }
+            }
+            if (hasUpperCase) {
+                if (hasLowerCase) {
+                    log.warn("The identifier has both lower case letter and upper case letter: " + identifier);
+                } else {
+                    // assume all lower case
+                    return identifier.toLowerCase(Locale.ROOT);
+                }
+            } else {
+                log.debug("The identifier has no upper case letter: " + identifier);
+            }
+        }
+        return identifier;
+    }
+
+    /**
+     * According to https://www.postgresql.org/docs/13/sql-syntax-lexical.html and
+     * https://www.postgresql.org/docs/16/sql-syntax-lexical.html,
+     * "the folding of unquoted names to lower case in PostgreSQL is incompatible with the SQL standard,
+     * which says that unquoted names should be folded to upper case."
+     * Therefore, this method is provided to convert the unquoted identifier that are folded to lower case
+     * to upper case to align with the SQL standard.
+     * Please be noted that if the <code>identifier</code> contains upper case letter,
+     * this method will consider it as a quoted name and
+     * will NOT convert the lower case letter to upper case.
+     * @param identifier the identifier to be converted to align with SQL standard
+     * @return an identifier that align with the SQL standard (lower case converted to upper case)
+     */
+    public static String sqlStandardIdentifier(final String identifier) {
+        boolean hasUpperCase = false;
+        boolean hasLowerCase = false;
+        for (final char c : identifier.toCharArray()) {
+            if (Character.isLowerCase(c)) {
+                hasLowerCase = true;
+            } else if (Character.isUpperCase(c)) {
+                hasUpperCase = true;
+            }
+        }
+        if (hasLowerCase) {
+            if (hasUpperCase) {
+                log.warn("The identifier has both lower case letter and upper case letter: " + identifier);
+            } else {
+                // assume all lower case
+                return identifier.toUpperCase(Locale.ROOT);
+            }
+        } else {
+            log.debug("The identifier has no lower case letter: " + identifier);
+        }
+        return identifier;
     }
 }
