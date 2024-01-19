@@ -16,15 +16,17 @@
 
 package tech.firas.db.datatype;
 
-import java.sql.Time;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Time;
 import java.sql.Types;
 import java.time.LocalTime;
 
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 
+@EqualsAndHashCode
 public class TimeType implements DataType {
 
     private static final long serialVersionUID = 1L;

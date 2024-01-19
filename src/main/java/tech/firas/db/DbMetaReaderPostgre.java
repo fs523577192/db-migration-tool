@@ -41,6 +41,7 @@ import tech.firas.db.datatype.ClobType;
 import tech.firas.db.datatype.DataType;
 import tech.firas.db.datatype.DateType;
 import tech.firas.db.datatype.DecimalType;
+import tech.firas.db.datatype.DoubleType;
 import tech.firas.db.datatype.IntegerType;
 import tech.firas.db.datatype.SmallIntType;
 import tech.firas.db.datatype.TimeType;
@@ -201,6 +202,9 @@ public class DbMetaReaderPostgre extends AbstractDbMetaReader {
             return BigIntType.instance;
         } else if ("smallint".equals(typeName)) {
             return SmallIntType.instance;
+
+        } else if ("double precision".equals(typeName)) {
+            return DoubleType.instance;
 
         } else if ("numeric".equals(typeName)) {
             final DecimalType decimalType = new DecimalType();

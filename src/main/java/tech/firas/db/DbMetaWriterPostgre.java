@@ -37,7 +37,7 @@ public class DbMetaWriterPostgre extends AbstractDbMetaWriter {
     @Override
     public String dataTypeToString(final DataType dataType) {
         if (dataType instanceof DoubleType) {
-            return "DOUBLE";
+            return "DOUBLE PRECISION";
         } else if (dataType instanceof FloatType) {
             return "REAL";
 

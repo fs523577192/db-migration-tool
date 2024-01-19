@@ -36,6 +36,7 @@ import tech.firas.db.datatype.ClobType;
 import tech.firas.db.datatype.DataType;
 import tech.firas.db.datatype.DateType;
 import tech.firas.db.datatype.DecimalType;
+import tech.firas.db.datatype.DoubleType;
 import tech.firas.db.datatype.IntegerType;
 import tech.firas.db.datatype.SmallIntType;
 import tech.firas.db.datatype.TimeType;
@@ -199,6 +200,9 @@ public class DbMetaReaderMySql extends AbstractDbMetaReader {
         return '`' + identifier + '`'; // TODO: complicated case with back quote in the identifier itself
     }
 
+    /**
+     * See https://dev.mysql.com/doc/connector-j/en/connector-j-reference-type-conversions.html
+     */
     private static DataType readDataType(final ResultSet resultSet) throws SQLException {
         final String typeName = resultSet.getString("data_type");
         if ("int".equals(typeName)) {
@@ -207,6 +211,9 @@ public class DbMetaReaderMySql extends AbstractDbMetaReader {
             return BigIntType.instance;
         } else if ("smallint".equals(typeName) || "tinyint".equals(typeName)) {
             return SmallIntType.instance;
+
+        } else if ("double".equals(typeName)) {
+            return DoubleType.instance;
 
         } else if ("decimal".equals(typeName)) {
             final DecimalType decimalType = new DecimalType();
@@ -234,7 +241,7 @@ public class DbMetaReaderMySql extends AbstractDbMetaReader {
             timeType.setPrecision(resultSet.getInt("datetime_precision"));
             return timeType;
 
-        } else if ("text".equals(typeName)) {
+        } else if ("text".equals(typeName) || "longtext".equals(typeName)) {
             return ClobType.instance;
 
         } else if ("blob".equals(typeName)) {

@@ -21,9 +21,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
 
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
-import lombok.Setter;
 
+@EqualsAndHashCode
 public class VarCharType implements DataType {
 
     private static final long serialVersionUID = 1L;

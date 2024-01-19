@@ -26,8 +26,10 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZonedDateTime;
 
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 
+@EqualsAndHashCode
 public class TimestampType implements DataType {
 
     private static final long serialVersionUID = 1L;
